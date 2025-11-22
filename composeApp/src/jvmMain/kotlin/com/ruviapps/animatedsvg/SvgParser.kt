@@ -4,7 +4,6 @@ package com.ruviapps.animatedsvg
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.asComposePath
 import org.jetbrains.skia.Path
 import org.jetbrains.skia.PathFillMode
 import org.jetbrains.skia.PathMeasure
@@ -16,7 +15,7 @@ import javax.xml.stream.XMLStreamConstants
 import javax.xml.stream.events.StartElement
 
 
-sealed class SvgNode(open val id: String?) {
+open class SvgNode(open val id: String?) {
     var parent: Group? = null
     var fillColor: Color? = null
     var strokeColor: Color? = null
@@ -65,9 +64,9 @@ data class ViewBox(
 )
 
 data class BuildPath(
-    val skiaPath : Path,
+    val skiaPath: Path,
     val svgNode: SvgNode,
-    val length : Float,
+    val length: Float,
 )
 
 // You can add more element types (Line, Ellipse, Polygon, Text...)
@@ -85,38 +84,42 @@ class SvgParser(private val namespaceAware: Boolean = true) {
         }
 
         fun SvgDocument.buildPaths(): List<BuildPath> {
-            val pathList = mutableListOf<BuildPath>()
-            for (c in root.children) {
-                when (c) {
-                    is PathElement -> {
-                        val path = Path.makeFromSVGString(c.d).apply {
-                            fillMode = if (c.fillTypeEvenOdd) PathFillMode.EVEN_ODD else PathFillMode.WINDING
+            return try {
+                val pathList = mutableListOf<BuildPath>()
+                for (c in root.children) {
+                    when (c) {
+                        is PathElement -> {
+                            val path = Path.makeFromSVGString(c.d).apply {
+                                fillMode = if (c.fillTypeEvenOdd) PathFillMode.EVEN_ODD else PathFillMode.WINDING
+                            }
+                            val pathMeasure = PathMeasure()
+                            pathMeasure.setPath(path, false)
+                            var totalLength = 0f
+                            do {
+                                totalLength += pathMeasure.length
+                            } while (pathMeasure.nextContour())
+                            pathList.add(
+                                BuildPath(
+                                    skiaPath = path,
+                                    svgNode = c,
+                                    length = totalLength
+                                )
+                            )
                         }
 
-                        val pathMeasure = PathMeasure()
-                        pathMeasure.setPath(path, false)
-                        var totalLength = 0f
-                        do {
-                            totalLength += pathMeasure.length
-                        } while (pathMeasure.nextContour())
-                        pathList.add(BuildPath(
-                            skiaPath = path,
-                            svgNode = c,
-                            length = totalLength
-                        ))
-                    }
-
-                    else -> {
-                        continue
+                        else -> {
+                            continue
+                        }
                     }
                 }
+                pathList
+            } catch (_: Throwable) {
+                emptyList()
             }
-            print(" Created Path List size = ${pathList.size}")
-            return pathList
         }
 
         fun List<BuildPath>.getTotalLength(): Float {
-            return  map { it.length }.sum()
+            return map { it.length }.sum()
         }
 
         fun SvgDocument.printSvgDocument() {

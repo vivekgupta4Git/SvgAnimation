@@ -1,5 +1,9 @@
 package com.ruviapps.animatedsvg
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -27,16 +31,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.ruviapps.animatedsvg.SvgParser.Companion.buildPaths
 import com.ruviapps.animatedsvg.SvgParser.Companion.getTotalLength
 import com.ruviapps.animatedsvg.SvgParser.Companion.printSvgDocument
+import com.ruviapps.animatedsvg.SvgRenderer.createFillPaint
 import com.ruviapps.animatedsvg.SvgRenderer.pathTraceSvgDocument
 import io.github.vinceglb.filekit.FileKit
 import io.github.vinceglb.filekit.absolutePath
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import kotlinx.coroutines.launch
+import org.jetbrains.skia.Matrix33
+import org.jetbrains.skia.PathMeasure
+import org.jetbrains.skia.Rect
 import java.io.File
+import kotlin.math.min
 
 private const val SUPPORTED_FILE_MESSAGE = "This tool only supports Svg"
 
