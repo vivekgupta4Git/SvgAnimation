@@ -83,32 +83,36 @@ object SvgRenderer {
         buildPaths.forEach { built ->
             if (remainingLength <= 0f) return@forEach
             //print("\n built path length: ${built.length} with targetLength = $targetLength and remainingLength = $remainingLength")
-            val pathDrawLength = remainingLength.coerceAtMost(built.length)
-            if (pathDrawLength > 0f) {
-                val tracedPath = Path()
-                val pathMeasure = PathMeasure().apply {
-                    setPath(built.skiaPath, false)
-                }
-                var lengthLeftOnPath = pathDrawLength
-                do {
-                    val contourLength = pathMeasure.length
-                    if (lengthLeftOnPath <= 0f) break
-                    val segmentLength = lengthLeftOnPath.coerceAtMost(contourLength)
-                    if (segmentLength > 0f) {
-                        pathMeasure.getSegment(
-                            0f,
-                            segmentLength,
-                            tracedPath,
-                            true
-                        )
+            try {
+                val pathDrawLength = remainingLength.coerceAtMost(built.length)
+                if (pathDrawLength > 0f) {
+                    val tracedPath = Path()
+                    val pathMeasure = PathMeasure().apply {
+                        setPath(built.skiaPath, false)
                     }
-                    lengthLeftOnPath -= segmentLength
-                } while (pathMeasure.nextContour())
-                val composePath = tracedPath.asComposePath()
-                val strokePaint = built.svgNode.createStrokePaint()
-                canvas.drawPath( composePath,strokePaint)
+                    var lengthLeftOnPath = pathDrawLength
+                    do {
+                        val contourLength = pathMeasure.length
+                        if (lengthLeftOnPath <= 0f) break
+                        val segmentLength = lengthLeftOnPath.coerceAtMost(contourLength)
+                        if (segmentLength > 0f) {
+                            pathMeasure.getSegment(
+                                0f,
+                                segmentLength,
+                                tracedPath,
+                                true
+                            )
+                        }
+                        lengthLeftOnPath -= segmentLength
+                    } while (pathMeasure.nextContour())
+                    val composePath = tracedPath.asComposePath()
+                    val strokePaint = built.svgNode.createStrokePaint()
+                    canvas.drawPath( composePath,strokePaint)
+                }
+                remainingLength -= pathDrawLength
+            }catch (t : Throwable){
+                println("Drawing $built with length ${built.length} has exceptions. Message: ${t.message}")
             }
-            remainingLength -= pathDrawLength
         }
     }
 

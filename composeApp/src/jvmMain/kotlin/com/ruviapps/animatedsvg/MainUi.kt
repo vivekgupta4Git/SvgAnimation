@@ -1,90 +1,71 @@
 package com.ruviapps.animatedsvg
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Button
-import androidx.compose.material.Checkbox
-import androidx.compose.material.ExperimentalMaterialApi
-import androidx.compose.material.FilterChip
-import androidx.compose.material.Slider
-import androidx.compose.material.Text
-import androidx.compose.material.TextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
-import com.ruviapps.animatedsvg.SvgParser.Companion.buildPaths
-import com.ruviapps.animatedsvg.SvgParser.Companion.getTotalLength
-import com.ruviapps.animatedsvg.SvgParser.Companion.printSvgDocument
-import com.ruviapps.animatedsvg.SvgRenderer.createFillPaint
 import com.ruviapps.animatedsvg.SvgRenderer.pathTraceSvgDocument
 import io.github.vinceglb.filekit.FileKit
 import io.github.vinceglb.filekit.absolutePath
 import io.github.vinceglb.filekit.dialogs.openFilePicker
 import kotlinx.coroutines.launch
-import org.jetbrains.skia.Matrix33
-import org.jetbrains.skia.PathMeasure
-import org.jetbrains.skia.Rect
 import java.io.File
-import kotlin.math.min
 
 private const val SUPPORTED_FILE_MESSAGE = "This tool only supports Svg"
 
 @Composable
 fun MainUi() {
     val svgGroups = rememberSaveable { mutableStateListOf<UiSvgItem.UiGroup>() }
-    val svgNodes = remember { mutableStateListOf<UiSvgItem.UiNode>() }
+    var svgDocument by remember { mutableStateOf<SvgDocument?>(null) }
+
     val groupMap = remember { mutableStateMapOf<String, Boolean>() }
     val itemMap = remember { mutableStateMapOf<String, Boolean>() }
-    var startShow by rememberSaveable { mutableStateOf(false) }
-    var svgDocument by remember { mutableStateOf<SvgDocument?>(null) }
-    LaunchedEffect(svgDocument) {
-        if (svgDocument != null) {
-            startShow = true
+
+// flatten groups + nodes recursively
+    val flatList by remember {
+        derivedStateOf {
+            flatten(svgGroups)
         }
     }
-    LaunchedEffect(svgGroups.size) {
-        svgGroups.forEach { g ->
-            if (!groupMap.containsKey(g.id)) {
-                groupMap[g.id] = true
-            }
-            g.items.forEach { item ->
-                if (!itemMap.containsKey(item.id)) {
-                    itemMap[item.id] = true
+
+
+    LaunchedEffect(svgGroups) {
+
+        val allGroupIds = mutableSetOf<String>()
+        val allItemIds = mutableSetOf<String>()
+
+        // Traverse all groups and items
+        svgGroups.forEachRecursively { item ->
+            when (item) {
+                is UiSvgItem.UiGroup -> {
+                    allGroupIds.add(item.id)
+                    groupMap.putIfAbsent(item.id, true) // default = checked
+                }
+
+                is UiSvgItem.UiNode -> {
+                    allItemIds.add(item.id)
+                    itemMap.putIfAbsent(item.id, true) // default = checked
                 }
             }
         }
-        svgNodes.clear()
-        val newNodes = svgGroups.map { it.items }.flatten()
-        svgNodes.addAll(newNodes)
-        // remove keys for groups/items that no longer exist
-        val groupIds = svgGroups.map { it.id }.toSet()
-        val itemIds = svgGroups.flatMap { it.items.map { it.id } }.toSet()
-        groupMap.keys.toList().forEach { if (it !in groupIds) groupMap.remove(it) }
-        itemMap.keys.toList().forEach { if (it !in itemIds) itemMap.remove(it) }
+
+        // Remove IDs no longer present
+        groupMap.keys.toList().forEach { id ->
+            if (id !in allGroupIds) groupMap.remove(id)
+        }
+        itemMap.keys.toList().forEach { id ->
+            if (id !in allItemIds) itemMap.remove(id)
+        }
     }
+
+
     val scope = rememberCoroutineScope()
     var columnWeight by rememberSaveable { mutableStateOf(0.2f) }
     var filePath by rememberSaveable { mutableStateOf("") }
@@ -115,8 +96,53 @@ fun MainUi() {
                     filePath = imageFile?.absolutePath().orEmpty()
                     //SvgParser.printSvgDocument(filePath)
                     svgDocument = SvgParser.getSvgDocument(file = File(filePath))
+                    // get raw ui model (can be UiGroup or UiNode at top-level)
+                    val rawUi = svgDocument?.toUiModel().orEmpty()
+
+                    // Build a list of top-level UiGroup:
+                    // - keep UiGroup as-is
+                    // - wrap top-level UiNode into a synthetic group "Root" so UI always has groups
+                    val topGroups = mutableListOf<UiSvgItem.UiGroup>()
+                    rawUi.forEach { item ->
+                        when (item) {
+                            is UiSvgItem.UiGroup -> topGroups.add(item)
+                            is UiSvgItem.UiNode -> {
+                                // wrap singleton nodes into a synthetic group so they appear in the tree
+                                topGroups.add(
+                                    UiSvgItem.UiGroup(
+                                        id = "root_${item.id}",
+                                        items = listOf(item)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // replace state list (do this on main thread - we're already in coroutine on main)
                     svgGroups.clear()
-                    svgGroups.addAll(svgDocument?.toUiModel() ?: emptyList())
+                    svgGroups.addAll(topGroups)
+
+                    // PREFILL selection maps immediately (default = true)
+                    // ensures UI draws in selected state on first composition
+                    topGroups.forEachRecursively { uiItem ->
+                        when (uiItem) {
+                            is UiSvgItem.UiGroup -> groupMap[uiItem.id] = true
+                            is UiSvgItem.UiNode -> itemMap[uiItem.id] = true
+                        }
+                    }
+
+                    // cleanup removed keys (in case previous file had other ids)
+                    val allGroupIds = mutableSetOf<String>()
+                    val allItemIds = mutableSetOf<String>()
+                    topGroups.forEachRecursively { uiItem ->
+                        when (uiItem) {
+                            is UiSvgItem.UiGroup -> allGroupIds.add(uiItem.id)
+                            is UiSvgItem.UiNode -> allItemIds.add(uiItem.id)
+                        }
+                    }
+                    groupMap.keys.toList().forEach { if (it !in allGroupIds) groupMap.remove(it) }
+                    itemMap.keys.toList().forEach { if (it !in allItemIds) itemMap.remove(it) }
+
 
                 }
             }, modifier = Modifier.weight(0.2f)) {
@@ -144,73 +170,61 @@ fun MainUi() {
                 .fillMaxWidth()
         ) {
             Column(Modifier.weight(columnWeight).fillMaxHeight().border(1.dp, Color.Black)) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                ) {
+                    items(flatList, key = { it.item.id }) { flat ->
 
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    svgGroups.forEach { group ->
-                        // group header
-                        item(key = "group-${group.id}") {
-                            // read the state directly from the map
-                            val isGroupChecked by remember { derivedStateOf { groupMap[group.id] == true } }
+                        val item = flat.item
+                        val level = flat.level
 
-                            ElementUi(
-                                name = group.id,
-                                isSelected = isGroupChecked,
-                                onSelection = { checked ->
-                                    // set group state
-                                    groupMap[group.id] = checked
-                                    // cascade to children if you want them to follow group toggle
-                                    group.items.forEach { child -> itemMap[child.id] = checked }
-                                }
-                            )
+                        when (item) {
+                            is UiSvgItem.UiGroup -> {
+                                val checked = groupMap[item.id] == true
+
+                                ElementUi(
+                                    modifier = Modifier.padding(start = (level * 20).dp),
+                                    name = item.id,
+                                    isSelected = checked,
+                                    onSelection = { newChecked ->
+                                        groupMap[item.id] = newChecked
+                                        // Cascade to all children
+                                        item.items.forEachRecursively { child ->
+                                            itemMap[child.id] = newChecked
+                                            if (child is UiSvgItem.UiGroup)
+                                                groupMap[child.id] = newChecked
+                                        }
+                                    }
+                                )
+                            }
+
+                            is UiSvgItem.UiNode -> {
+                                val checked = itemMap[item.id] == true
+
+                                ElementUi(
+                                    modifier = Modifier.padding(start = (level * 20).dp),
+                                    name = item.id,
+                                    isSelected = checked,
+                                    onSelection = { newChecked ->
+                                        if (groupMap[item.id] == true)
+                                            itemMap[item.id] = newChecked
+                                        // Update parent group state
+                                        item.parentId?.let { parent ->
+                                            updateParentState(parent, groupMap, itemMap)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
-
-                    // group children
-                    items(
-                        items = svgNodes,
-                        key = { it.id }
-                    )
-                    { node ->
-                        // stable read
-                        val isItemChecked by remember { derivedStateOf { itemMap[node.id] == true } }
-                        val isGroupOpen by remember { derivedStateOf { groupMap[node.parentId] == true } }
-
-                        ElementUi(
-                            modifier = Modifier.padding(start = 20.dp),
-                            name = node.id,
-                            // visually only enabled when group is open; actual checked state comes from itemMap
-                            isSelected = isItemChecked && isGroupOpen,
-                            onSelection = { newChecked ->
-                                if (isGroupOpen)
-                                    itemMap[node.id] = newChecked
-                                val childIds = svgGroups
-                                    .find { it.id == node.id }
-                                    ?.items
-                                    ?.map { it.id }
-                                    .orEmpty()
-
-                                val allChecked = childIds.all { id -> itemMap[id] == true }
-                                val noneChecked = childIds.none { id -> itemMap[id] == true }
-                                // update group accordingly
-                                if (node.parentId != null) {
-                                    groupMap[node.parentId] = when {
-                                        allChecked -> true
-                                        noneChecked -> false
-                                        else -> groupMap[node.parentId] == true
-                                    }
-                                }
-                            }
-                        )
-                    }
                 }
+
             }
             Column(
                 modifier = Modifier.weight((1f - columnWeight).coerceIn(0.1f, 0.9f)).fillMaxHeight()
                     .border(1.dp, Color.Black)
             ) {
-                if(startShow){
-                    svgDocument?.pathTraceSvgDocument()
-                }
+                svgDocument?.pathTraceSvgDocument()
             }
         }
     }
