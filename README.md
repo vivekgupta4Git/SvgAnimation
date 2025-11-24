@@ -1,3 +1,44 @@
+# 🖼️ SVG Layer Viewer – Compose Desktop
+
+A lightweight **Compose Desktop** application that loads, parses, visualizes, and controls SVG layers and shapes.  
+Made for developers, designers, and anyone who needs to inspect SVG structure with real-time visibility toggles.
+
+---
+
+## ✨ Features
+
+### ✔ Load & View SVG Files  
+- Supports standalone SVG files  
+- Custom SVG parser (paths, groups, circles, polygons, polylines, rects)
+
+### ✔ Real-Time Canvas Preview  ( work in progress)
+- Only selected elements are rendered   
+- Great for debugging large vector files
+
+### ✔ Modern Compose Desktop UI  
+- Split-screen layout  
+- Adjustable left-pane width using Slider  
+
+---
+
+## 🎥 Demo Video  
+
+
+
+https://github.com/user-attachments/assets/8cd5f840-40f3-4786-a58d-6d1393dd2bf0
+
+
+---
+
+## 🛠️ Tech Stack
+
+- **Kotlin**
+- **Jetpack Compose Desktop**
+- **Coroutines**
+- **Custom SVG Parsing Logic**
+
+---
+
 This is a Kotlin Multiplatform project targeting Desktop (JVM).
 
 * [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
