@@ -1,113 +1,130 @@
 package com.ruviapps.animatedsvg
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.ruviapps.animatedsvg.SvgParser.Companion.collectPathsFromNode
+
 sealed class UiSvgItem {
     abstract val id: String
-    abstract val parentId : String?
+    abstract val parentId: String?
+
     data class UiGroup(
         override val id: String,
-        val items: List<UiSvgItem>,
-        override val parentId : String? = null
+        val children: List<UiSvgItem>,
+        override val parentId: String? = null
     ) : UiSvgItem()
 
     data class UiNode(
         override val id: String,
-        val type: String,
-        override val parentId : String? = null
+        override val parentId: String? = null,
+        val builtPath : List<BuildPath>
     ) : UiSvgItem()
 
 }
-data class UiFlatItem(
-    val item: UiSvgItem,
-    val level: Int
-)
-fun UiSvgItem.forEachRecursively(action: (UiSvgItem) -> Unit) {
-    action(this)
-    if (this is UiSvgItem.UiGroup) {
-        items.forEach { it.forEachRecursively(action) }
-    }
-}
 
-fun List<UiSvgItem>.forEachRecursively(action: (UiSvgItem) -> Unit) {
-    this.forEach { it.forEachRecursively(action) }
-}
+fun SvgDocument.toUiTree(): UiSvgItem.UiGroup {
 
-fun updateParentState(
-    parentId: String,
-    groupMap: MutableMap<String, Boolean>,
-    itemMap: MutableMap<String, Boolean>
-) {
-    groupMap[parentId] ?: return
+    fun walk(node: SvgNode, parentId: String?): UiSvgItem {
+        return when (node) {
 
-    // All child nodes checked?
-    val allChecked = itemMap.filterKeys { it.startsWith(parentId) }.values.all { it }
-    val noneChecked = itemMap.filterKeys { it.startsWith(parentId) }.values.none { it }
+            is Group -> UiSvgItem.UiGroup(
+                id = node.id ?: "group_${node.hashCode()}",
+                parentId = parentId,
+                children = node.children.map { child ->
+                    walk(child, node.id)
+                }
+            )
 
-    groupMap[parentId] = when {
-        allChecked -> true
-        noneChecked -> false
-        else -> groupMap[parentId] == true
-    }
-}
+            is PathElement -> asUiNode(node,"Path",parentId)
 
-fun flatten(items: List<UiSvgItem>, level: Int = 0): List<UiFlatItem> {
-    val result = mutableListOf<UiFlatItem>()
-    for (i in items) {
-        result += UiFlatItem(i, level)
-        if (i is UiSvgItem.UiGroup) {
-            result += flatten(i.items, level + 1)
+            is CircleElement -> asUiNode(node, "Circle",parentId)
+
+            is RectElement -> asUiNode(node, "Rect",parentId)
+
+            is PolylineElement -> asUiNode(node, "Polyline",parentId)
+
+            is LineElement -> asUiNode(node, "Line",parentId)
+
+            else -> asUiNode(node, "PathElement",parentId)
         }
     }
-    return result
+
+    return walk(root, null) as UiSvgItem.UiGroup
+
 }
+fun asUiNode(node: SvgNode, idPrefix: String, parentId: String?) =
+    UiSvgItem.UiNode(
+        id = node.id ?: "${idPrefix}_${node.hashCode()}",
+        parentId = parentId,
+        builtPath = mutableListOf<BuildPath>().apply {
+            collectPathsFromNode(node, this)
+        }
+    )
 
-fun SvgDocument.toUiModel(): List<UiSvgItem> {
+@Composable
+fun UiTree(
+    item: UiSvgItem,
+    level: Int,
+    stateMap: MutableMap<String, Boolean>,
+    animMap: MutableMap<String, Animatable<Float, AnimationVector1D>>
+) {
+    val isChecked = stateMap[item.id] ?: true
 
-    fun walk(group: Group): UiSvgItem.UiGroup {
-        val items = mutableListOf<UiSvgItem>()
-
-        for (child in group.children) {
-            when (child) {
-
-                is Group -> {
-                    items += walk(child) // keep hierarchy
-                }
-
-                is PathElement -> items += UiSvgItem.UiNode(
-                    id = child.id ?: "path",
-                    type = "path"
+    // If this is a path/node, animate when the checkbox state changes
+    if (item is UiSvgItem.UiNode) {
+        val anim = animMap[item.id] ?: remember { Animatable(0f) } // defensive
+        // LaunchedEffect keyed to the checkbox state so it runs when toggled
+        LaunchedEffect(isChecked) {
+            if (isChecked) {
+                // animate in
+                anim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 700, easing = LinearEasing)
                 )
-
-                is RectElement -> items += UiSvgItem.UiNode(
-                    id = child.id ?: "rect",
-                    type = "rect"
+            } else {
+                // animate out
+                anim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 450, easing = LinearEasing)
                 )
-
-                is CircleElement -> items += UiSvgItem.UiNode(
-                    id = child.id ?: "circle",
-                    type = "circle"
-                )
-
-                is PolygonElement -> items += UiSvgItem.UiNode(
-                    id = child.id ?: "polygon",
-                    type = "polygon"
-                )
-
-                is PolylineElement -> items += UiSvgItem.UiNode(
-                    id = child.id ?: "polyline",
-                    type = "polyline"
-                )
-
-                // add line, ellipse etc if needed
             }
         }
-
-        return UiSvgItem.UiGroup(
-            id = group.id ?: "group",
-            items = items
-        )
     }
 
-    // return ALL top-level groups or nodes inside root
-    return walk(root).items
+    ElementUi(
+        modifier = Modifier.padding(start = (level * 16).dp),
+        name = item.id,
+        isSelected = isChecked,
+        onSelection = { selected ->
+            // update checkbox state
+            stateMap[item.id] = selected
+            // if group, cascade to children (existing helper)
+            if (item is UiSvgItem.UiGroup) markChildren(item, selected, stateMap)
+        }
+    )
+
+    if (item is UiSvgItem.UiGroup) {
+        item.children.forEach { child ->
+            UiTree(child, level + 1, stateMap, animMap)
+        }
+    }
+}
+
+
+fun markChildren(group: UiSvgItem.UiGroup, selected: Boolean, state: MutableMap<String, Boolean>) {
+    group.children.forEach { child ->
+        state[child.id] = selected
+        if (child is UiSvgItem.UiGroup) {
+            markChildren(child, selected, state)
+        }
+    }
 }
 

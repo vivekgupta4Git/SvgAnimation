@@ -4,11 +4,7 @@ package com.ruviapps.animatedsvg
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import org.jetbrains.skia.Path
-import org.jetbrains.skia.PathFillMode
-import org.jetbrains.skia.PathMeasure
-import org.jetbrains.skia.RRect
-import org.jetbrains.skia.Rect
+import org.jetbrains.skia.*
 import java.io.File
 import java.io.FileReader
 import javax.xml.namespace.QName
@@ -184,7 +180,7 @@ class SvgParser(private val namespaceAware: Boolean = true) {
             return totalLength
         }
 
-        private fun collectPathsFromNode(
+         fun collectPathsFromNode(
             node: SvgNode,
             list: MutableList<BuildPath>
         ) {
